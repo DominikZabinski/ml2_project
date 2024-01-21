@@ -76,6 +76,30 @@ Stacked models:
 
 Assessment metric: RMSE
 
+# 
+
+Decision tree:
+
+- *cp* - threshold for improving tree complexity
+
+Random forest:
+
+- *mtry* - number of predictors to use
+- *ntree* - number of trees
+
+GBM:
+
+- *ntree* - number of trees
+- *interaction.depth* - depth of a tree 
+- *shrinkage* - learning rate parameter
+- *n.minobsinnode* - min. number of obs. in split
+
+XGBoost:
+
+- *min_child_weight* - min. number of obs. in terminal node
+- *nrounds* - number of trees
+- *eta* - learning parameter
+
 # Results
 
 ![Model comparison - train data](306068_regression_report_files/figure-html/compare_train-1.png)
@@ -93,7 +117,7 @@ summ_up_table %>%
            mse_test = round(mse_test, 3)) %>% 
     kable(booktabs = T, format = "latex", 
           col.names = c("Model", "RMSE (Train)", "RMSE (Test)")) %>%
-    kable_styling(font_size = 7) %>%
+    kable_styling(font_size = 8) %>%
     row_spec(which(summ_up_table$mse_train == min(summ_up_table$mse_train)), bold = T, color = "white", background = "green") %>% 
     row_spec(which(summ_up_table$mse_test == min(summ_up_table$mse_test)), underline = T)
 ```
@@ -108,9 +132,8 @@ summ_up_table %>%
     - alcohol, volatile acidity, sulphates
     - feat04 and feat 07
 - What is the best model for this task?
-    - Random Forest
+    - Ensemble
 - How good is the best model?
-    - RMSE: 1.13
+    - RMSE: 1.135
 - What could be done differently?
-    - hyperparameter tuning might improve the results
     - binning continuous variables

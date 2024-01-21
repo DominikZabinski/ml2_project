@@ -236,7 +236,7 @@ data_test[, x_variables] <- lapply(X = x_variables, FUN = function(i) (data_test
 
 ## Decision tree
 
-Decision tree with default parameters
+Decision tree
 
 ```{r, train_dec_tree}
 model_dec_tree <- caret::train(form = create_model_formula("quality", x_variables), 
@@ -244,8 +244,9 @@ model_dec_tree <- caret::train(form = create_model_formula("quality", x_variable
                                method = "rpart",
                                trControl = train_control_params, 
                                # default setting caused warnings that made impossible to compute variable importance in ensembling step (due to constant variance of predictions in one of the folds)
-                               tuneGrid = data.frame(cp = seq(0, .1/2, .01/2))
-                               )
+                               tuneGrid = data.frame(cp = seq(0, .05, .005))
+)
+model_dec_tree$bestTune
 ```
 
 
@@ -271,13 +272,16 @@ varImp(model_dec_tree$finalModel) %>%
 
 ## Random forest
 
-Random forest with default settings:
+Random forest:
 
 ```{r, train_random_forest}
 model_random_forest <- caret::train(form = create_model_formula("quality", x_variables),
                                     data = data_train, 
-                                    method = "rf",
-                                    trControl = train_control_params)
+                                    method = "rf", 
+                                    ntre = 200,
+                                    trControl = train_control_params, 
+                                    tuneGrid = data.frame(mtry = 4:19))
+model_random_forest$bestTune
 ```
 
 Which features are the most important?
@@ -303,6 +307,10 @@ model_gbm <- caret::train(form = create_model_formula("quality", x_variables),
                           data = data_train, 
                           method = "gbm",
                           trControl = train_control_params, 
+                          tuneGrid = expand.grid(n.trees = seq(100, 300, by = 50),
+                                                 interaction.depth = c(1, 2, 4), 
+                                                 shrinkage = c(0.01, 0.1), 
+                                                 n.minobsinnode = seq(10, 25, 5)),
                           distribution = "gaussian",
                           verbose = FALSE)
 ```
@@ -324,6 +332,14 @@ summary.gbm(object = model_gbm$finalModel, plotit = FALSE) %>%
 XGBoost with default settings:
 
 ```{r, traing_xgboost}
+static_params_xgboost <- list(colsample_bytree = sqrt(length(x_variables)) / length(x_variables),
+                              subsample = 0.8, 
+                              gamma = 1,
+                              max_depth = 8)
+tune_params_xgboost <- list(min_child_weight = nrow(data_train) * seq(.5, 1, .1) / 100,
+                            nrounds = seq(20, 80, 10),
+                            eta = seq(0.01, .15, by = .01))
+
 file_to_look_for <- "model_xgboost_reg.rds"
 if (!file.exists(file_to_look_for)) {
     start <- Sys.time()
@@ -331,12 +347,14 @@ if (!file.exists(file_to_look_for)) {
                            data = data_train,
                            method = "xgbTree",
                            trControl = train_control_params, 
+                           tuneGrid = do.call("expand.grid", c(static_params_xgboost, tune_params_xgboost)),
                            verbosity = 0)
-    print(Sys.time() - start) # 10-50s
+    print(Sys.time() - start) # 20s
     saveRDS(object = model_xgboost, file = file_to_look_for)
 } else {
     model_xgboost <- readRDS(file = file_to_look_for)
 }
+model_xgboost$bestTune
 ```
 
 Variable importance
@@ -369,11 +387,12 @@ We'll use all the previous models for ensembling.
 ```{r, list_ensemble}
 model_list <- caretEnsemble::caretList(create_model_formula("quality", x_variables),
                                        data = data_train,
-                                       methodList = c("rf", "lm"),
+                                       methodList = c("lm"),
                                        tuneList = list(
-                                           rpart = caretModelSpec(method = "rpart", tuneGrid = data.frame(cp = seq(0, .1/2, .01/2))), 
-                                           gbm = caretModelSpec(method = "gbm", distribution = "gaussian", verbose = FALSE),
-                                           xgbTree = caretModelSpec(method = "xgbTree", verbosity = 0)
+                                           rpart = caretModelSpec(method = "rpart", tuneGrid = model_dec_tree$bestTune), 
+                                           rf = caretModelSpec(method = "rf", ntree = 200, tuneGrid = model_random_forest$bestTune),
+                                           gbm = caretModelSpec(method = "gbm", distribution = "gaussian", verbose = FALSE, tuneGrid = model_gbm$bestTune),
+                                           xgbTree = caretModelSpec(method = "xgbTree", verbosity = 0, tuneGrid = model_xgboost$bestTune)
                                        ),
                                        trControl = train_control_params)
 

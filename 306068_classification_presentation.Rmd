@@ -143,5 +143,5 @@ summ_up_table %>%
 - How good is the best model?
     - AUC: 94%
 - What could be done differently?
-    - hyperparameter tuning might improve the results
+    - hyperparameter tuning
     - binning continuous variables
