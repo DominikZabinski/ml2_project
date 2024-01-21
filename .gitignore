@@ -1,0 +1,6 @@
+*
+!.gitignore
+!*.md
+!*.R
+!*.Rmd
+!*.pdf

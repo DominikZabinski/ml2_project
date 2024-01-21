@@ -1,0 +1,116 @@
+---
+title: "Sip or Savour?"
+subtitle: "Uncorking the Secrets of Wine Quality Prediction with Machine Learning"
+author: "Dominik Zabinski 306068"
+output: 
+    beamer_presentation:
+        theme: "Goettingen"
+        colortheme: "dolphin"
+        fonttheme: "structurebold"
+header-includes:
+- \usepackage{booktabs}
+- \usepackage[table]{xcolor}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(tidyverse)
+library(kableExtra)
+```
+
+# Agenda
+
+- Problem definition
+- Data analysis
+- Data preparation
+- Methods
+- Results
+- Summary
+
+# Problem definition
+
+- Which features are most important while predicting wine quality?
+- What is the best model for this task?
+- How good is the best model?
+
+# Data analysis
+
+![Wine quality distribution](306068_regression_report_files/figure-html/y_distribution-1.png)
+
+#
+
+```{r}
+readRDS("regr_table_descr_cont.rds") %>% 
+    mutate(min = round(min, 2), mean = round(mean, 2), sd = round(sd, 2), max = round(max, 2)) %>% 
+    kable(booktabs = T, format = "latex", 
+          col.names = c("Variable", "Min", "Avg", "Sd", "Max", "# miss.", "# dist.")) %>%
+    kable_styling(latex_options = "striped", font_size = 7)
+```
+
+# 
+
+![Correlation matrix between continous variables](306068_regression_report_files/figure-html/corrplot-1.png)
+
+# Data preparation
+
+- split training/testing in 70/30 proportion
+- normalize continuous variables
+- 5-fold cross-validation as sampling method
+
+# Methods
+
+Single models:
+
+- Decision tree
+- Random forest
+- Generalized Boosted Regression Modeling (GBM)
+- eXtreme Gradient Boosting (XGBoost)
+- Linear regression (as benchmark)
+
+Ensemble model: weighted combination of single models
+
+Stacked models:
+
+- Linear Regression as top layer model
+- XGBoost as top layer model
+
+Assessment metric: RMSE
+
+# Results
+
+![Model comparison - train data](306068_regression_report_files/figure-html/compare_train-1.png)
+
+#
+
+![Model comparison - test data](306068_regression_report_files/figure-html/compare_test-1.png)
+
+# 
+
+```{r}
+summ_up_table <- readRDS("regr_summ_up_table.rds")
+summ_up_table %>% 
+    mutate(mse_train = round(mse_train, 3),
+           mse_test = round(mse_test, 3)) %>% 
+    kable(booktabs = T, format = "latex", 
+          col.names = c("Model", "RMSE (Train)", "RMSE (Test)")) %>%
+    kable_styling(font_size = 7) %>%
+    row_spec(which(summ_up_table$mse_train == min(summ_up_table$mse_train)), bold = T, color = "white", background = "green") %>% 
+    row_spec(which(summ_up_table$mse_test == min(summ_up_table$mse_test)), underline = T)
+```
+
+#
+
+![Variable importance - ensemble model](306068_regression_report_files/figure-html/var_imp_ensemble-1.png)
+
+# Summary
+
+- Which features are most important while predicting wine quality?
+    - alcohol, volatile acidity, sulphates
+    - feat04 and feat 07
+- What is the best model for this task?
+    - Random Forest
+- How good is the best model?
+    - RMSE: 1.13
+- What could be done differently?
+    - hyperparameter tuning might improve the results
+    - binning continuous variables
