@@ -10,12 +10,11 @@ output:
 
 ```{r setup, include=FALSE}
 # libraries
-library(tidyverse) # data wrangling
-library(corrplot) # nice correlation matrix charts
-library(kableExtra) # styling tables
-library(caret) # ease the process of training/testing different models 
-library(caretEnsemble) # ensembling and stacking
-# loading specific libraries
+library(tidyverse) 
+library(corrplot) 
+library(kableExtra) 
+library(caret) 
+library(caretEnsemble) 
 library(rpart)
 library(randomForest)
 library(gbm)
@@ -25,112 +24,8 @@ library(xgboost)
 knitr::opts_chunk$set(cache = FALSE)
 options(scipen = 999)
 
-#' Describe single continuous variable from the dataset
-#'
-#' @param data_ 
-#' @param variable 
-#'
-#' @return
-#' @export
-#'
-#' @examples
-describe_cont_var <- function(data_, variable) {
-    data.frame(name = variable, 
-               min = min(data_raw[[variable]], na.rm = T),
-               mean = mean(data_raw[[variable]], na.rm = T),
-               sd = sd(data_raw[[variable]], na.rm = T),
-               max = max(data_raw[[variable]], na.rm = T),
-               missing = sum(is.na(data_raw[[variable]])),
-               distinct = dplyr::n_distinct(data_raw[[variable]]))    
-}
-
-#' Create formula for the model
-#'
-#' @param y 
-#' @param x 
-#'
-#' @return
-#' @export
-#'
-#' @examples
-create_model_formula <- function(y, x) {
-   paste0(c(y, paste0(x, collapse = " + ")), collapse = "~") %>% 
-        as.formula()    
-}
-
-#' Calculate Mean Square Error of and model
-#'
-#' @param model 
-#' @param data_ 
-#' @param ys 
-#'
-#' @return
-#' @export
-#'
-#' @examples
-rmse_model <- function(model, data_, ys) {
-    resid <- ys - predict(object = model, newdata = data_)
-    sqrt(mean(resid ^ 2))
-}
-
-#' Calculate MSE groping by (rounded) original values
-#'
-#' @param model object model
-#' @param data_ data.frame with data
-#' @param y_name name of y variable
-#'
-#' @return
-#' @export
-#'
-#' @examples
-aggr_model_res <- function(model, data_, y_name) {
-    data.frame(x = data_[[y_name]],
-               pred_ys = predict(object = model, newdata = data_)) %>% 
-        mutate(se = (x - pred_ys) ^ 2, rx = round(x, 1)) %>% 
-        group_by(rx) %>% 
-        summarise(rmse = sqrt(mean(se)), count_x = n())
-}
-
-#' Plot to compare multiple models on the same data
-#'
-#' @param models list of models specifications
-#' @param data_ data.frame with data
-#' @param y_name name of y variable
-#'
-#' @return
-#' @export
-#'
-#' @examples
-compare_models <- function(models, data_, y_name) {
-    rmse_models <- do.call(what = "rbind",
-                           args = lapply(X = names(models), 
-                                         FUN = function(x) {
-                                             an_model <- get(model_list_specs[[x]]$model_n)
-                                             data.frame(model_name = x, 
-                                                        rmse_ag = rmse_model(model = an_model, data_ = data_, ys = data_[[y_name]]))
-                                         }))
-    
-    rmse_models <- rmse_models %>% 
-        mutate(lab = paste0(model_name, ": ", round(rmse_ag, 2)))
-    
-    res <- do.call(what = "rbind", 
-                   args = lapply(X = names(models), 
-                                 FUN = function(x){
-                                     df_ <- aggr_model_res(get(model_list_specs[[x]]$model_n), data_, y_name)
-                                     df_$model_name <- x
-                                     df_
-                                 }))
-    res %>% 
-        left_join(y = rmse_models, by = "model_name") %>% 
-        ggplot() +
-        geom_hline(data = rmse_models, mapping = aes(yintercept = rmse_ag), linewidth = .5) +
-        geom_text(data = rmse_models[1, ], mapping = aes(x = min(res$rx), y = rmse_ag, label = "RMSE"), hjust = 0, vjust = -.5, size = 3) +
-        geom_point(mapping = aes(x = rx, y = rmse, fill = lab, size = count_x), shape = 21, color = "white") +
-        theme_minimal() +
-        facet_wrap(~lab) +
-        labs(y = "MSE", x = "Wine quality (rounded)") +
-        theme(legend.position = "none")
-}
+# functions
+source("__functions.R")
 ```
 
 ```{r, reading_data}
@@ -158,7 +53,7 @@ names(data_raw) <- make.names(names(data_raw))
 # 'quality' as dependent variable
 y_variable <- "quality"
 # rest (excluding 'id') are predictors
-x_variables <- setdiff(names(data_raw), c("id", "quality"))
+x_variables <- setdiff(names(data_raw), c("id", y_variable))
 ```
 
 Quick look at the dependent variable:
@@ -196,7 +91,7 @@ corrplot::corrplot(corr = cor(data_raw[, c(x_variables, y_variable)]), method = 
 
 - high correlation between *pH* and *fixed.acidicity*
 - weak correlation between *citric.acid* and *violatile.acidicity*, *pH*
-- no clear correlation between outcome variable and predictors
+- no clear correlation between outcome variable and predictors except for *feat04* and *feat06*
 
 # Data preparation 
 
@@ -236,43 +131,58 @@ data_test[, x_variables] <- lapply(X = x_variables, FUN = function(i) (data_test
 
 ## Decision tree
 
-Decision tree
+First model to train will be a **decision tree**. Apart from using default {caret} parameters I'll add hyperparametr: **cp**. It determines the complexity of a tree it impose restrictions on tree growth. 
 
 ```{r, train_dec_tree}
 model_dec_tree <- caret::train(form = create_model_formula("quality", x_variables), 
                                data = data_train, 
                                method = "rpart",
                                trControl = train_control_params, 
-                               # default setting caused warnings that made impossible to compute variable importance in ensembling step (due to constant variance of predictions in one of the folds)
                                tuneGrid = data.frame(cp = seq(0, .05, .005))
 )
-model_dec_tree$bestTune
 ```
 
+What is the best value of **cp** parameter?
 
-Take a look at the splits:
+### cp tuning {.tabset}
+
+#### Table
+
+```{r, dec_tree_hyper}
+table_with_highlight(data_ = model_dec_tree$results, col_name = "RMSE")
+```
+
+#### Plot
+
+```{r, dec_tree_hyper_plot}
+plot(model_dec_tree)
+```
+
+### {-}
+
+Best value for **cp** is **0.025** which means that any split that does not decrease overall lack of fit by a factor of 0.025 is not attempted.
+
+### Model results
+
+Take a look at the splits of the tree.
 
 ```{r, dec_tree_splits}
 rpart.plot::rpart.plot(model_dec_tree$finalModel)
 ```
 
-How important are the variables?
+It is a simple tree: first split is done according to the **alcohol** value, in next either **feat07** or **volatile.acidity** are used. Beside the split we should look into variable importance:
 
 ```{r, var_imp_dec_tree}
-varImp(model_dec_tree$finalModel) %>% 
-    filter(., Overall > 0) %>% 
-    ggplot(mapping = aes(x = row.names(.), y = Overall)) +
-    geom_col() +
-    coord_flip() +
-    theme_minimal() +
-    labs(x = "variables")
+var_imp_plot(data_ = varImp(model_dec_tree$finalModel) %>% mutate(variable = row.names(.)) %>% filter(Overall > 0), 
+             var_name = "variable", 
+             var_imp_name = "Overall", plot_title = "Variable importance - Decision Tree")
 ```
 
-**volatile.acidicity**, **feat07** and **alcohol** seems to be the most important.
+**volatile.acidity**, **sulphates** and **citric.acid** seems to be the most important variables.
 
 ## Random forest
 
-Random forest:
+Next model to use is random forest. I'll change number of trees (**ntree**) from 500 to 200. Additionally I'll try to find the optimal value of **mtry** parameter. In order to do so I'll search the values between 4 and 10 (the default value is square root from the number of predictors - in ths case $\sqrt{21} = 4.5$)
 
 ```{r, train_random_forest}
 model_random_forest <- caret::train(form = create_model_formula("quality", x_variables),
@@ -280,27 +190,47 @@ model_random_forest <- caret::train(form = create_model_formula("quality", x_var
                                     method = "rf", 
                                     ntre = 200,
                                     trControl = train_control_params, 
-                                    tuneGrid = data.frame(mtry = 4:19))
-model_random_forest$bestTune
+                                    tuneGrid = data.frame(mtry = 4:10))
 ```
+
+### mtry tuning {.tabset}
+
+#### Table
+
+```{r, rf_hyper}
+table_with_highlight(model_random_forest$results, "RMSE")
+```
+
+#### Plot
+
+```{r, rf_hyper_plot}
+plot(model_random_forest)
+```
+
+### {-}
+
+Best value for **ntry** is **9** which means that for each of the trees only 9 randomly selected predictors will be used.
+
+### Model results
 
 Which features are the most important?
 
 ```{r, var_imp_rf}
-varImp(model_random_forest)$importance %>%  
-    filter(., Overall > 0) %>% 
-    ggplot(mapping = aes(x = row.names(.), y = Overall)) +
-    geom_col() +
-    coord_flip() +
-    theme_minimal() +
-    labs(x = "variables")
+var_imp_plot(data_ = varImp(model_random_forest)$importance %>% mutate(variable = row.names(.)) %>% filter(Overall > 0), 
+             var_name = "variable", 
+             var_imp_name = "Overall", plot_title = "Variable importance - Random Forest")
 ```
 
-Alcohol and feat07 are most important variables.
+**alcohol**, **feat07** and **volatile.acidity** are the most important variables.
 
 ## Generalized Boosted Regression Modeling (GBM)
 
-GBM model with default settings:
+Next model is GBM. In this case 4 hyperparameters will be optimized:
+
+- *ntree* - number of trees. Values from 100 to 300 (by 50) will be checked.
+- *interaction.depth* - depth of a tree. I'll check 1, 2, or 4.
+- *shrinkage* - learning rate parameter. Only 2 values of this parameter will be used: 0.01 and 0.1.
+- *n.minobsinnode* - minimum number of observations in split. I'll try values between 10 and 25 (by 5).
 
 ```{r, train_gbm}
 model_gbm <- caret::train(form = create_model_formula("quality", x_variables),
@@ -315,63 +245,124 @@ model_gbm <- caret::train(form = create_model_formula("quality", x_variables),
                           verbose = FALSE)
 ```
 
+### GBM tuning {.tabset}
+
+#### Table
+
+```{r, gbm_hyper}
+table_with_highlight(model_gbm$results %>% top_n(n = 10, wt = -RMSE), "RMSE")
+```
+
+#### Plot
+
+```{r, gbm_hyper_plot}
+plot(model_gbm)
+```
+
+### {-}
+
+As we can suspect the quality of the model gains as the number of trees increases (**ntree**). What is interesting that the behavior of **shrinkage** and **interaction.depth** parameters. In the end the combination of lower learning rate (**shrinkage** = 0.01) and higher depth of tree (**interaction.depth** = 4) turned out to be the best combination. Tuning of the last parameter (**n.minobsinnode**) resulted in value equal to 10.  
+
+### Model results
+
 What are the most important features?
 
 ```{r, var_imp_gbm}
-summary.gbm(object = model_gbm$finalModel, plotit = FALSE) %>% 
-    filter(., rel.inf > 0) %>% 
-    ggplot(mapping = aes(x = var, y = rel.inf)) +
-    geom_col() +
-    coord_flip() +
-    theme_minimal() +
-    labs(x = "variables")
+var_imp_plot(data_ = summary.gbm(object = model_gbm$finalModel, plotit = FALSE), 
+             var_name = "var", 
+             var_imp_name = "rel.inf", plot_title = "Variable importance - GBM")
 ```
+
+In GBM model the most important variables were **alcohol**, **feat07**, **volatile.acidity**, **feat04** and **sulphates**.
 
 ## eXtreme Gradient Boosting (XGBoost)
 
-XGBoost with default settings:
+{caret} package enables to tune 7 parameters for XGBoost model. 4 of them
+
+- *min_child_weight* - minimum number of observations in terminal node. Searching from 0.5% to 1% of number of observations (by 0.1%)
+- *nrounds* - number of trees. Searching between 20 and 80 (by 10)
+- *eta* - learning parameter. Searching between 0.01 to 0.15 (by 0.01)
+- *colsample_bytree* - fraction of predictors to use. Searching between $\frac{\sqrt{21}}{21}$ ~ 21% to 61% (by 10%)
+
+Other 3 will be set constant:
+
+- *subsample* - size (in %) of subsample drawn from training dataset (set to 80)
+- *gamma* - Minimum Loss Reduction (set to 1)
+- *max_depth* - maximum depth of tree (set to 8)
 
 ```{r, traing_xgboost}
-static_params_xgboost <- list(colsample_bytree = sqrt(length(x_variables)) / length(x_variables),
-                              subsample = 0.8, 
-                              gamma = 1,
-                              max_depth = 8)
-tune_params_xgboost <- list(min_child_weight = nrow(data_train) * seq(.5, 1, .1) / 100,
+tune_params_xgboost <- list(colsample_bytree = seq(sqrt(length(x_variables)) / length(x_variables), 0.65, 0.1),
+                            min_child_weight = nrow(data_train) * seq(.5, 1, .1) / 100,
                             nrounds = seq(20, 80, 10),
                             eta = seq(0.01, .15, by = .01))
+
+static_params_xgboost <- list(subsample = 0.8, 
+                              gamma = 1,
+                              max_depth = 8)
 
 file_to_look_for <- "model_xgboost_reg.rds"
 if (!file.exists(file_to_look_for)) {
     start <- Sys.time()
     model_xgboost <- caret::train(form = create_model_formula("quality", x_variables),
-                           data = data_train,
-                           method = "xgbTree",
-                           trControl = train_control_params, 
-                           tuneGrid = do.call("expand.grid", c(static_params_xgboost, tune_params_xgboost)),
-                           verbosity = 0)
-    print(Sys.time() - start) # 20s
+                                  data = data_train,
+                                  method = "xgbTree",
+                                  trControl = train_control_params, 
+                                  tuneGrid = do.call("expand.grid", c(static_params_xgboost, tune_params_xgboost)),
+                                  verbosity = 0)
+    print(Sys.time() - start) # 3mins
     saveRDS(object = model_xgboost, file = file_to_look_for)
 } else {
     model_xgboost <- readRDS(file = file_to_look_for)
 }
-model_xgboost$bestTune
 ```
 
-Variable importance
+### xGBoost tuning {.tabset}
+
+#### Table
+
+```{r, xgb_hyper}
+table_with_highlight(model_xgboost$results %>% top_n(n = 10, wt = -RMSE), "RMSE")
+```
+
+#### Plot
+
+```{r, xgb_hyper_plot}
+plot(model_xgboost)
+```
+
+#### Non-standard plot
+
+```{r, xgb_hyper_plot_other}
+do.call(rbind, args = lapply(X = names(tune_params_xgboost), FUN = function(i) {
+    model_xgboost$results %>% select(tune_val = i, meas_val = RMSE) %>% mutate(flag = i)
+})) %>% 
+    ggplot(mapping = aes(x = tune_val, y = meas_val)) + 
+    geom_point() +
+    facet_wrap(~flag, scales = "free_x") +
+    geom_smooth(method = "loess", formula = "y ~ x") +
+    labs(x = "Value of tuned parameter", y = "RMSE", title = "Values of tuned parameters vs RMSE") +
+    theme_minimal()
+```
+
+### {-}
+
+It seems that **colsample_bytree** and **min_child_weight** parameters didn't really matter. As suspected larger **eta** and **nrounds** lead to better results. But the best results were achieved with **eta** = 0.05, **nrounds** = 80, **colsample_bytree** = 0.41 and **min_child_weight** = 9.8. The best **eta** point could be observed as an elbow point in both standard (if displayed on large enough screen) and non-standard plots.
+
+### Model results
+
+What are the most important features?
 
 ```{r, var_imp_xgb}
-varImp(model_xgboost)$importance %>%  
-    filter(., Overall > 0) %>% 
-    ggplot(mapping = aes(x = row.names(.), y = Overall)) +
-    geom_col() +
-    coord_flip() +
-    theme_minimal() +
-    labs(x = "variables")
+var_imp_plot(data_ = varImp(model_xgboost)$importance %>% mutate(variable = row.names(.)) %>% filter(Overall > 0), 
+             var_name = "variable", 
+             var_imp_name = "Overall", plot_title = "Variable importance - xGBoost")
 ```
+
+In xGBoost model the most important variables were **alcohol**, **feat07**, **volatile.acidity**, **feat04** and **sulphates**. It is the same set of features as in GBM model (slightly different order).
 
 ## Linear regression
 
-As a benchmark model
+As a benchmark model I'll used simple linear regression model.
 
 ```{r, train_lm}
 model_linear_regr <- caret::train(form = create_model_formula("quality", x_variables), 
@@ -382,7 +373,7 @@ model_linear_regr <- caret::train(form = create_model_formula("quality", x_varia
 
 # Ensembling and stacking
 
-We'll use all the previous models for ensembling.
+I'll use all the previous models for ensembling and stacking.
 
 ```{r, list_ensemble}
 model_list <- caretEnsemble::caretList(create_model_formula("quality", x_variables),
@@ -398,10 +389,43 @@ model_list <- caretEnsemble::caretList(create_model_formula("quality", x_variabl
 
 ```
 
+What is the correlations between models?
 
-```{r, correlation_between_models}
-modelCor(resamples(model_list))
+## Correlation {.tabset}
+
+### Plot
+
+```{r, correlation_between_models_plot}
+corrplot::corrplot(modelCor(resamples(model_list)), method = "number")
 ```
+
+### Table
+
+```{r, correlation_between_models_table}
+modelCor(resamples(model_list)) %>% 
+    as.data.frame() %>% 
+    mutate(id = row.names(.)) %>% 
+    pivot_longer(cols = setdiff(names(.), "id")) %>% 
+    mutate(p1 = pmin(id, name), p2 = pmax(id, name)) %>% 
+    select(p1, p2, value) %>% 
+    unique() %>% 
+    filter(p1 != p2) %>% 
+    top_n(n = 4, wt = abs(value)) %>% 
+    arrange(-value) %>% 
+    kable(col.names = c("Model 1", "Model 2", "Correlation coeff.")) %>% 
+    kable_styling()
+```
+
+## {-}
+
+The highest correlation (in absolute terms) are between:
+
+- xGBoost and GBM: 0.9905
+- xGBoost and Random Forest: 0.9500
+- GBM and Linear Regression: 0.9469
+- Linear Regression and xGBoost: 0.9291
+
+Those findings are consistent with what was seen when analyzing each model separately.
 
 ## Ensembling
 
@@ -410,35 +434,37 @@ model_ensembled <- caretEnsemble::caretEnsemble(model_list)
 summary(model_ensembled)
 ```
 
+By default {caret} packages uses linear regression to determine the weights for each model. Lets look at variable importance:
+
 ```{r, var_imp_ensemble}
 res_var_imp_ens <- varImp(model_ensembled) %>% 
     mutate(variable = rownames(.)) %>% 
     gather("model", "importance", -variable)
 
 imp_lvls <- res_var_imp_ens %>% 
-    filter(model == "overall") %>% arrange(importance) %>% .$variable
+    filter(model == "overall")  %>% top_n(n = 10, wt = importance) %>% arrange(importance) %>% .$variable
 
 res_var_imp_ens %>% 
     filter(variable %in% imp_lvls) %>% 
     mutate(variable2 = factor(x = variable, levels = imp_lvls)) %>%
     ggplot(mapping = aes(x = variable2, y = importance, color = model)) +
-    geom_point(aes(shape = model == "overall", 
-                   alpha = model == "overall",
-                   size = model == "overall")) +
+    geom_point(mapping = aes(shape = model == "overall", 
+                             size = model == "overall")) +
     coord_flip() +
     theme_minimal() +
-    scale_alpha_manual(guide = "none", values = c("TRUE" = 1, "FALSE" = .7)) +
-    scale_size_manual(guide = "none", values = c("TRUE" = 3, "FALSE" = 2)) +
+    scale_size_manual(guide = "none", values = c("TRUE" = 4, "FALSE" = 3)) +
     scale_color_viridis_d() +
     scale_shape_manual(values = c("TRUE" = 5, "FALSE" = 16)) +
     labs(x = "variables", color = "Model", shape = "Is it overall\nmodel?",
-         title = "Variable importance from ensemble model",
-         subtitle = "top 20")
+         title = "Variable importance from ensemble model", y = "Variable importance") +
+    theme(legend.position = "bottom")
 ```
+
+As we clearly see the Decision Tree model picked substantially different variables as the most important.
 
 ## Stacking 
 
-As stack model we use XGBoost and linear regression for comparison.
+As stack model I'll use XGBoost and Lasso Regression as top layer models for comparison.
 
 ```{r, train_model_stacked_xgb}
 stacked_tr <- trainControl(method = "boot", 
@@ -451,16 +477,16 @@ model_stacked_xgb <- caretEnsemble::caretStack(model_list,
 ```
 
 ```{r, train_model_stacked_lm}
-model_stacked_lm <- caretEnsemble::caretStack(model_list,
-                                              method = "lm",
-                                              trControl = stacked_tr)
+model_stacked_lasso <- caretEnsemble::caretStack(model_list,
+                                                 method = "lasso",
+                                                 trControl = stacked_tr)
 ```
 
 # Model assessment 
 
-Comparison between training and testing data.
+As an assessment methods I'll use RMSE. First, define model list:
 
-```{r, compare_train}
+```{r, define_models_for_comparison}
 model_list_specs <- list("Decision tree" = list(model_n = "model_dec_tree"),
                          "Random forest" = list(model_n = "model_random_forest"),
                          "GBM"           = list(model_n = "model_gbm"),
@@ -468,44 +494,52 @@ model_list_specs <- list("Decision tree" = list(model_n = "model_dec_tree"),
                          "Linear"        = list(model_n = "model_linear_regr"),
                          "Ensembled"     = list(model_n = "model_ensembled"),
                          "Stacked (XGB)" = list(model_n = "model_stacked_xgb"),
-                         "Stacked (LR)"  = list(model_n = "model_stacked_lm"))
+                         "Stacked (Lasso)"  = list(model_n = "model_stacked_lasso"))
+```
 
+## Comparison {.tabset}
+
+### RMSE on training data
+
+```{r, compare_train}
 compare_models(model_list_specs, data_train, "quality")
 ```
+
+### RMSE on testing data
 
 ```{r, compare_test}
 compare_models(model_list_specs, data_test, "quality")
 ```
 
-Using table.
+### Table
 
 ```{r, comparison_table}
 summ_up_table <- do.call(what = "rbind", 
                          args = lapply(X = names(model_list_specs), 
                                        FUN = function(i){
                                            data.frame(name = i, 
-                                                      mse_train = rmse_model(model = get(model_list_specs[[i]]$model_n), data_ = data_train, ys = data_train[[y_variable]]),
-                                                      mse_test = rmse_model(model = get(model_list_specs[[i]]$model_n), data_ = data_test, ys = data_test[[y_variable]]))
+                                                      rmse_train = rmse_model(model = get(model_list_specs[[i]]$model_n), data_ = data_train, ys = data_train[[y_variable]]),
+                                                      rmse_test = rmse_model(model = get(model_list_specs[[i]]$model_n), data_ = data_test, ys = data_test[[y_variable]]))
                                        })) %>% 
-    arrange(., abs(mse_train - mse_test)) 
+    arrange(., abs(rmse_train - rmse_test)) 
 
 saveRDS(object = summ_up_table, file = "regr_summ_up_table.rds")
 
 summ_up_table %>% 
-    kable(booktabs = T) %>%
+    mutate(rank_train = rank(rmse_train), rank_test = rank(rmse_test)) %>% 
+    kable(booktabs = T, col.names = c("Model", "RMSE (Train)", "RMSE (Test)", "Rank (Train)", "Rank (Test)")) %>%
     kable_styling() %>%
-    row_spec(which(summ_up_table$mse_train == min(summ_up_table$mse_train)), bold = T, color = "white", background = "green") %>% 
-    row_spec(which(summ_up_table$mse_test == min(summ_up_table$mse_test)), underline = T)
+    row_spec(which(summ_up_table$rmse_train == min(summ_up_table$rmse_train)), bold = T, color = "white", background = "green") %>% 
+    row_spec(which(summ_up_table$rmse_test == min(summ_up_table$rmse_test)), underline = T)
 ```
 
-# Results
+## Results
 
-- Smallest MSE on train was recorded in Random Forest, largest in Decision Tree. 
-- Smallest MSE on test was recorded for Ensembled/Stacked, largest in Decision Tree.
-- Smallest overfit was in Linear Regressien (as measure by the change between MSE in training vs testing dataset).
+Smallest RMSE on train data was recorded in Random Forest (0.43), largest in Decision Tree (1.1). On testing data smallest RMSE characterized Ensembled model (1.13), largest: Decision Tree (1.24).
+Smallest overfit was found in Linear Regressien (as measure by the change between RMSE in training vs testing dataset). 
 
 # Summary and conclusions
 
-- Ensemble/Stacked model was the best approach
+Ensemble model was the best model - it had 3rd lowest RMSE on training data and 1st lowest on testing. 
 - Stacking with linear regression yields same (ish) results as ensembling
 - alcohol as most dominant feature
