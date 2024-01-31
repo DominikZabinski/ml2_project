@@ -41,6 +41,102 @@ describe_disc_var <- function(data_, variable) {
     )
 }
 
+#' Creates plot with variable distribution
+#'
+#' @param data_ 
+#' @param col_name_ 
+#'
+#' @return
+#' @export
+#'
+#' @examples
+create_perc_plot <- function(data_, col_name_, q_breaks = NULL) {
+    data1 <- data_ %>% 
+        mutate(var = .[[col_name_]]) %>% 
+        group_by(var) %>% 
+        summarise(perc_1 = sum(salary == "morethan50K") / n())
+    
+    if (is.null(q_breaks)) {
+        pick_tiles <- T
+        n_tiles <- 11
+        while(pick_tiles) {
+            q_breaks <- quantile(data_[[col_name_]], probs = seq(0, 1, length.out = n_tiles))
+            if (length(unique(q_breaks)) != n_tiles) {
+                n_tiles <- n_tiles - 1
+            } else {
+                pick_tiles <- F
+            }
+        }
+    }
+    
+    data2 <- data_ %>% 
+        mutate(var = .[[col_name_]]) %>% 
+        mutate(var_dec = cut(var, q_breaks, include.lowest = T)) %>% 
+        group_by(var_dec) %>% 
+        summarise(perc_1 = sum(salary == "morethan50K") / n(), 
+                  part = round(100 * n() / nrow(data_), 1),
+                  var_mean = sum(range(var)) / 2, xmin = min(var), xmax = max(var)) %>% 
+        mutate(lab = sprintf("%s [%s]", round(100 * perc_1, 1), part))
+    
+    ggplot() +
+        geom_smooth(data = data1, mapping = aes(x = var, y = perc_1), method = "loess", formula = "y ~ x") +
+        geom_point(data = data1, mapping = aes(x = var, y = perc_1)) +
+        geom_segment(data = data2, mapping = aes(x = xmin, xend = xmax, y = perc_1, yend = perc_1), color = "red") +
+        geom_point(data = data2, mapping = aes(x = var_mean, y = perc_1), size = 2, color = "red") + 
+        geom_text(data = data2, mapping = aes(x = var_mean, y = perc_1, label = lab), color = "red", vjust = -1) + 
+        theme_minimal() +
+        scale_y_continuous(labels = scales::percent) +
+        labs(x = col_name_, y = "Percentage of salary == 'morethan50K'")
+}
+
+#' Creates plot with variable distribution
+#'
+#' @param data_ 
+#' @param col_name_ 
+#'
+#' @return
+#' @export
+#'
+#' @examples
+create_mean_plot <- function(data_, col_name_, q_breaks = NULL) {
+    data1 <- data_ %>% 
+        mutate(var = .[[col_name_]]) %>% 
+        group_by(var) %>% 
+        summarise(perc_1 = mean(quality))
+    
+    if (is.null(q_breaks)) {
+        pick_tiles <- T
+        n_tiles <- 11
+        while(pick_tiles) {
+            q_breaks <- quantile(data_[[col_name_]], probs = seq(0, 1, length.out = n_tiles))
+            if (length(unique(q_breaks)) != n_tiles) {
+                n_tiles <- n_tiles - 1
+            } else {
+                pick_tiles <- F
+            }
+        }
+    }
+    
+    data2 <- data_ %>% 
+        mutate(var = .[[col_name_]]) %>% 
+        mutate(var_dec = cut(var, q_breaks, include.lowest = T)) %>% 
+        group_by(var_dec) %>% 
+        summarise(perc_1 = mean(quality), 
+                  part = paste0(round(100 * n() / nrow(data_), 1), "%"),
+                  var_mean = sum(range(var)) / 2, xmin = min(var), xmax = max(var)) %>% 
+        mutate(lab = sprintf("%s [%s]", round(perc_1, 1), part))
+    
+    ggplot() +
+        geom_smooth(data = data1, mapping = aes(x = var, y = perc_1), 
+                    method = "loess", formula = "y ~ x", fill = "orange") +
+        geom_point(data = data1, mapping = aes(x = var, y = perc_1), alpha = .5) +
+        geom_segment(data = data2, mapping = aes(x = xmin, xend = xmax, y = perc_1, yend = perc_1), color = "red") +
+        geom_point(data = data2, mapping = aes(x = var_mean, y = perc_1), size = 2, color = "red") + 
+        geom_label(data = data2, mapping = aes(x = var_mean, y = perc_1, label = lab), color = "red", vjust = -1) + 
+        theme_minimal() + 
+        labs(x = col_name_, y = "Mean value of quality")
+}
+
 # Models - general ----
 #' Create formula for the model
 #'

@@ -23,29 +23,31 @@ library(xgboost)
 # settings
 knitr::opts_chunk$set(cache = FALSE)
 options(scipen = 999)
+store_results_in <- "regr_results/"
+dir.create(store_results_in, showWarnings = FALSE, recursive = TRUE)
 
 # functions
 source("__functions.R")
 ```
 
-```{r, reading_data}
-data_raw <- read_csv(file = "r2.csv", show_col_types = FALSE)
-```
-
 # Description of data and problem
 ## Data
-Vinho Verde data. Quick look at the dataset structure.
+Data regards Vinho Verde. Load the dataset and take a quick look at the dataset structure.
 
 ```{r, glimpse_at_data}
+data_raw <- read_csv(file = "r2.csv", show_col_types = FALSE)
 glimpse(data_raw)
 ```
 
+1,400 observations, 23 variables.
+
 ## Problem
-Predict wine quality
+
+Predict wine quality based on its features.
 
 # Descriptive analyses
 
-Establish dependent variable (**y_variable**) and predictors (**x_variables**).
+Start with establishing dependent variable (**y_variable**) and predictors (**x_variables**).
 
 ```{r, data_cleaning}
 # Change the column names to avoid possible problems in the future
@@ -67,16 +69,16 @@ ggplot(data = data_raw, mapping = aes(x = .data[[y_variable]])) +
     labs(title = "Distribution of wine quality", x = "Quality", y = "Density", subtitle = "bins: observed, line: estimated")
 ```
 
-Take a look at continuous variables:
+It takes values from 1.8 up to 10.6 (mean = 5.7). Take a look at continuous variables:
 
 ```{r, descr_cont}
 table_descr_cont <- do.call(what = rbind, args = lapply(X = x_variables, FUN = function(i) describe_cont_var(data_raw, i)))
 
-saveRDS(object = table_descr_cont, file = "regr_table_descr_cont.rds")
+saveRDS(object = table_descr_cont, file = paste0(store_results_in, "regr_table_descr_cont.rds"))
 
 table_descr_cont %>% 
     mutate(min = round(min, 2), mean = round(mean, 2), sd = round(sd, 2), max = round(max, 2)) %>% 
-    kable(booktabs = T) %>%
+    kable(booktabs = T, col.names = c("Variable", "Min.", "Mean", "SD", "Max.", "# missing", "# unique")) %>%
     kable_styling()
 ```
 
@@ -93,7 +95,289 @@ corrplot::corrplot(corr = cor(data_raw[, c(x_variables, y_variable)]), method = 
 - weak correlation between *citric.acid* and *violatile.acidicity*, *pH*
 - no clear correlation between outcome variable and predictors except for *feat04* and *feat06*
 
+## EDA {.tabset}
+
+### alcohol
+
+```{r, alcohol_plot}
+create_mean_plot(data_ = data_raw, col_name_ = "alcohol", q_breaks = c(-Inf, 10, 11, 12, Inf))
+```
+
+There is a weak positive correlation between *alcohol* and *quality*. I've decided to split this variable into 4 bins.
+
+```{r, alcohol_transform}
+data_raw <- data_raw %>% 
+    mutate(trans.alcohol = as.character(as.numeric(cut(x = alcohol, c(-Inf, 10, 11, 12, Inf)), include.lowest = T)))
+```
+
+### chlorides
+
+```{r, chlorides_plot}
+create_mean_plot(data_ = data_raw, col_name_ = "chlorides", q_breaks = c(-Inf, 0.075, 0.1, 0.15, Inf)) + 
+    scale_x_log10() + labs(x = "chlorides (log)")
+```
+
+There is a weak negative correlation between *chlorides* and *quality*. I've decided to split this variable into 4 bins.
+
+```{r, chlorides_transform}
+data_raw <- data_raw %>% 
+    mutate(trans.chlorides = as.character(as.numeric(cut(x = chlorides, c(-Inf, 0.075, 0.1, 0.15, Inf)), include.lowest = T)))
+```
+
+### citric.acid
+
+```{r, citric.acid_plot}
+create_mean_plot(data_ = data_raw, col_name_ = "citric.acid", q_breaks = c(-Inf, .25, .5, Inf))
+```
+
+There is a weak positive correlation between *citric.acid* and *quality*. I've decided to split this variable into 3 bins.
+
+```{r, citric.acid_transform}
+data_raw <- data_raw %>% 
+    mutate(trans.citric.acid = as.character(as.numeric(cut(x = citric.acid, c(-Inf, .25, .5, Inf)), include.lowest = T)))
+```
+
+### density
+
+```{r, density_plot}
+create_mean_plot(data_ = data_raw, col_name_ = "density", q_breaks = c(-Inf, Inf))
+```
+
+There is no clear correlation between *density* and *quality*. I've decided to remove that variable.
+
+```{r, density_transform}
+x_variables <- setdiff(x_variables, "density")
+```
+
+### feat01
+
+```{r, feat01_plot}
+create_mean_plot(data_ = data_raw, col_name_ = "feat01", q_breaks = c(-Inf, Inf))
+```
+
+There is no clear correlation between *feat01* and *quality*. I've decided to remove that variable.
+
+```{r, feat01_transform}
+x_variables <- setdiff(x_variables, "feat01")
+```
+
+### feat02
+
+```{r, feat02_plot}
+create_mean_plot(data_ = data_raw, col_name_ = "feat02", q_breaks = c(-Inf, Inf))
+```
+
+There is no clear correlation between *feat02* and *quality*. I've decided to remove that variable.
+
+```{r, feat02_transform}
+x_variables <- setdiff(x_variables, "feat02")
+```
+
+### feat03
+
+```{r, feat03_plot}
+create_mean_plot(data_ = data_raw, col_name_ = "feat03", q_breaks = c(-Inf, Inf))
+```
+
+There is no clear correlation between *feat03* and *quality*. I've decided to remove that variable.
+
+```{r, feat03_transform}
+x_variables <- setdiff(x_variables, "feat03")
+```
+
+### feat04
+
+```{r, feat04_plot}
+create_mean_plot(data_ = data_raw, col_name_ = "feat04", q_breaks = c(-Inf, .4, .65, .7, Inf))
+```
+
+There is weak positive correlation between *feat04* and *quality*. I've decided to split this variable into 4 bins.
+
+```{r, feat04_transform}
+data_raw <- data_raw %>% 
+    mutate(trans.feat04 = as.character(as.numeric(cut(x = feat04, c(-Inf, .4, .65, .7, Inf)), include.lowest = T)))
+```
+
+### feat05
+
+```{r, feat05_plot}
+create_mean_plot(data_ = data_raw, col_name_ = "feat05", q_breaks = c(-Inf, Inf))
+```
+
+There is no clear correlation between *feat05* and *quality*. I've decided to remove that variable.
+
+```{r, feat05_transform}
+x_variables <- setdiff(x_variables, "feat05")
+```
+
+### feat06
+
+```{r, feat06_plot}
+create_mean_plot(data_ = data_raw, col_name_ = "feat06", q_breaks = c(-Inf, Inf))
+```
+
+There is no clear correlation between *feat06* and *quality*. I've decided to remove that variable.
+
+```{r, feat06_transform}
+x_variables <- setdiff(x_variables, "feat06")
+```
+
+### feat07
+
+```{r, feat07}
+create_mean_plot(data_ = data_raw, col_name_ = "feat07", q_breaks = c(-Inf, .5, .7, Inf))
+```
+
+There is a weak positive correlation between *feat07* and *quality*. I've decided to split this variable into 3 bins.
+
+```{r, feat07_transform}
+data_raw <- data_raw %>% 
+    mutate(trans.feat07 = as.character(as.numeric(cut(x = feat07, c(-Inf, .5, .7, Inf)), include.lowest = T)))
+```
+
+### feat08
+
+```{r, feat08_plot}
+create_mean_plot(data_ = data_raw, col_name_ = "feat08", q_breaks = c(-Inf, Inf))
+```
+
+There is no clear correlation between *feat08* and *quality*. I've decided to remove that variable.
+
+```{r, feat08_transform}
+x_variables <- setdiff(x_variables, "feat08")
+```
+
+### feat09
+
+```{r, feat09_plot}
+create_mean_plot(data_ = data_raw, col_name_ = "feat09", q_breaks = c(-Inf, Inf))
+```
+
+There is no clear correlation between *feat09* and *quality*. I've decided to remove that variable.
+
+```{r, feat09_transform}
+x_variables <- setdiff(x_variables, "feat09")
+```
+
+### feat10
+
+```{r, feat10_plot}
+create_mean_plot(data_ = data_raw, col_name_ = "feat10", q_breaks = c(-Inf, Inf))
+```
+
+There is no clear correlation between *feat10* and *quality*. I've decided to remove that variable.
+
+```{r, feat10_transform}
+x_variables <- setdiff(x_variables, "feat10")
+```
+
+
+### fixed.acidity
+
+```{r, fixed.acidity_plot}
+create_mean_plot(data_ = data_raw, col_name_ = "fixed.acidity", q_breaks = c(-Inf, 7, 8, 9, 10, 11, Inf))
+```
+
+There is a weak quadratic relation between *fixed.acidity* and *quality*. I've decided to split this variable into 6 bins.
+
+```{r, fixed.acidity_transform}
+data_raw <- data_raw %>% 
+    mutate(trans.fixed.acidity = as.character(as.numeric(cut(x = fixed.acidity, c(-Inf, 7, 8, 9, 10, 11, Inf)), include.lowest = T)))
+```
+
+### free.sulfur.dioxide
+
+```{r, free.sulfur.dioxide_plot}
+create_mean_plot(data_ = data_raw, col_name_ = "free.sulfur.dioxide", q_breaks = c(-Inf, 20, Inf))
+```
+
+There is a weak negative relation between *free.sulfur.dioxide* and *quality*. I've decided to split this variable into 2 bins.
+
+```{r, free.sulfur.dioxide_transform}
+data_raw <- data_raw %>% 
+    mutate(trans.free.sulfur.dioxide = as.character(as.numeric(cut(x = free.sulfur.dioxide, c(-Inf, 20, Inf)), include.lowest = T)))
+```
+
+### pH
+
+```{r, pHplot}
+create_mean_plot(data_ = data_raw, col_name_ = "pH", q_breaks = c(-Inf, 3.2, 3.4, Inf))
+```
+
+There is a weak quadratic relation between *pH* and *quality*. I've decided to split this variable into 3 bins.
+
+```{r, pH_transform}
+data_raw <- data_raw %>% 
+    mutate(trans.pH = as.character(as.numeric(cut(x = pH, c(-Inf, 3.2, 3.4, Inf)), include.lowest = T)))
+```
+
+### residual.sugar
+
+```{r, residual.sugar_plot}
+create_mean_plot(data_ = data_raw, col_name_ = "residual.sugar", q_breaks = c(-Inf, Inf))
+```
+
+There is no clear correlation between *residual.sugar* and *quality*. I've decided to remove that variable.
+
+```{r, residual.sugar_transform}
+x_variables <- setdiff(x_variables, "residual.sugar")
+```
+
+### sulphates
+
+```{r, sulphates_plot}
+create_mean_plot(data_ = data_raw, col_name_ = "sulphates", q_breaks = c(-Inf, 4.5, 4.6, 4.7, 5, Inf))
+```
+
+There is a weak quadratic relation between *sulphates* and *quality*. I've decided to split this variable into 5 bins.
+
+```{r, sulphates_transform}
+data_raw <- data_raw %>% 
+    mutate(trans.sulphates = as.character(as.numeric(cut(x = sulphates, c(-Inf, 4.5, 4.6, 4.7, 5, Inf)), include.lowest = T)))
+```
+
+### total.sulfur.dioxide
+
+```{r, total.sulfur.dioxide_plot}
+create_mean_plot(data_ = data_raw, col_name_ = "total.sulfur.dioxide", q_breaks = c(-Inf, Inf))
+```
+
+There is a weak negative relation between *sulphates* and *quality*. I've decided to leave that variable as is.
+
+### volatile.acidity
+
+```{r, volatile.acidity_plot}
+create_mean_plot(data_ = data_raw, col_name_ = "volatile.acidity", q_breaks = c(-Inf, Inf))
+```
+
+There is a weak negative relation between *volatile.acidity* and *quality*. I've decided to leave that variable as is.
+
 # Data preparation 
+
+After initial EDA I've decided to:
+
+- bin several variables into discrete
+- remove variable with no correlation to *quality*
+- leave some variables as they were (for project sake)
+
+Discrete variables will be decoded as binary:
+
+```{r, one_hot}
+x_variables_dsc <- names(data_raw)[which(regexpr(pattern = "^trans", text = names(data_raw)) > 0)]
+# fullRank = TRUE takes care of linear dependency of variables
+one_hot_data <- data.frame(predict(object = dummyVars(formula = " ~ .", data = data_raw[x_variables_dsc], fullRank = TRUE), 
+                                   newdata = data_raw[x_variables_dsc]))
+```
+
+Bind all in one object:
+
+```{r, create_new_data}
+x_variables_cont <- setdiff(x_variables, gsub(pattern = "^trans\\.", replacement = "", x = x_variables_dsc))
+new_data_raw <- cbind(data_raw[c(y_variable, x_variables_cont)], one_hot_data)
+new_x_variables <- setdiff(names(new_data_raw), y_variable)
+```
+
+Final dataset consists 27 variables.
 
 ## Creating training and testing dataset
 
@@ -101,11 +385,11 @@ corrplot::corrplot(corr = cor(data_raw[, c(x_variables, y_variable)]), method = 
 
 ```{r, data_partitioning}
 set.seed(306068)
-training_obs <- caret::createDataPartition(data_raw$quality, 
+training_obs <- caret::createDataPartition(new_data_raw$quality, 
                                            p = 0.7, 
                                            list = FALSE)
-data_train <- data_raw[training_obs,]
-data_test <- data_raw[-training_obs,]
+data_train <- new_data_raw[training_obs,]
+data_test <- new_data_raw[-training_obs,]
 ```
 
 Additionally 5-time Cross validation will be used.
@@ -121,10 +405,10 @@ train_control_params <- trainControl(method = "cv",
 Normalize continuous variables (based on parameters form training data)
 
 ```{r, data_normalization}
-means <- apply(X = data_train[, x_variables], MARGIN = 2, FUN = mean)
-sds <- apply(X = data_train[, x_variables], MARGIN = 2, FUN = sd)
-data_train[, x_variables] <- lapply(X = x_variables, FUN = function(i) (data_train[[i]] - means[i]) / sds[i])
-data_test[, x_variables] <- lapply(X = x_variables, FUN = function(i) (data_test[[i]] - means[i]) / sds[i])
+means <- apply(X = data_train[, x_variables_cont], MARGIN = 2, FUN = mean)
+sds <- apply(X = data_train[, x_variables_cont], MARGIN = 2, FUN = sd)
+data_train[, x_variables_cont] <- lapply(X = x_variables_cont, FUN = function(i) (data_train[[i]] - means[i]) / sds[i])
+data_test[, x_variables_cont] <- lapply(X = x_variables_cont, FUN = function(i) (data_test[[i]] - means[i]) / sds[i])
 ```
 
 # Model training
@@ -134,7 +418,7 @@ data_test[, x_variables] <- lapply(X = x_variables, FUN = function(i) (data_test
 First model to train will be a **decision tree**. Apart from using default {caret} parameters I'll add hyperparametr: **cp**. It determines the complexity of a tree it impose restrictions on tree growth. 
 
 ```{r, train_dec_tree}
-model_dec_tree <- caret::train(form = create_model_formula("quality", x_variables), 
+model_dec_tree <- caret::train(form = create_model_formula("quality", new_x_variables), 
                                data = data_train, 
                                method = "rpart",
                                trControl = train_control_params, 
@@ -160,7 +444,7 @@ plot(model_dec_tree)
 
 ### {-}
 
-Best value for **cp** is **0.025** which means that any split that does not decrease overall lack of fit by a factor of 0.025 is not attempted.
+Best value for **cp** is **0.015** which means that any split that does not decrease overall lack of fit by a factor of 0.015 is not attempted.
 
 ### Model results
 
@@ -170,7 +454,7 @@ Take a look at the splits of the tree.
 rpart.plot::rpart.plot(model_dec_tree$finalModel)
 ```
 
-It is a simple tree: first split is done according to the **alcohol** value, in next either **feat07** or **volatile.acidity** are used. Beside the split we should look into variable importance:
+It is a simple tree: first split is done according to the **volatile.acidity** value, in next either **feat04** or **alcohol** is used. Beside the split we should look into variable importance:
 
 ```{r, var_imp_dec_tree}
 var_imp_plot(data_ = varImp(model_dec_tree$finalModel) %>% mutate(variable = row.names(.)) %>% filter(Overall > 0), 
@@ -178,19 +462,19 @@ var_imp_plot(data_ = varImp(model_dec_tree$finalModel) %>% mutate(variable = row
              var_imp_name = "Overall", plot_title = "Variable importance - Decision Tree")
 ```
 
-**volatile.acidity**, **sulphates** and **citric.acid** seems to be the most important variables.
+**total.sulfur.dioxide**, **alcohol** and **sulphates** seems to be the most important variables.
 
 ## Random forest
 
-Next model to use is random forest. I'll change number of trees (**ntree**) from 500 to 200. Additionally I'll try to find the optimal value of **mtry** parameter. In order to do so I'll search the values between 4 and 10 (the default value is square root from the number of predictors - in ths case $\sqrt{21} = 4.5$)
+Next model to use is random forest. I'll change number of trees (**ntree**) from 500 to 200. Additionally I'll try to find the optimal value of **mtry** parameter. In order to do so I'll search the values between 4 and 10 (the default value is square root from the number of predictors - in ths case $\sqrt{27} = 5.2$)
 
 ```{r, train_random_forest}
-model_random_forest <- caret::train(form = create_model_formula("quality", x_variables),
+model_random_forest <- caret::train(form = create_model_formula("quality", new_x_variables),
                                     data = data_train, 
                                     method = "rf", 
                                     ntre = 200,
                                     trControl = train_control_params, 
-                                    tuneGrid = data.frame(mtry = 4:10))
+                                    tuneGrid = data.frame(mtry = 5:10))
 ```
 
 ### mtry tuning {.tabset}
@@ -209,7 +493,7 @@ plot(model_random_forest)
 
 ### {-}
 
-Best value for **ntry** is **9** which means that for each of the trees only 9 randomly selected predictors will be used.
+Best value for **ntry** is **5** which means that for each of the trees only 5 randomly selected predictors will be used.
 
 ### Model results
 
@@ -221,7 +505,7 @@ var_imp_plot(data_ = varImp(model_random_forest)$importance %>% mutate(variable 
              var_imp_name = "Overall", plot_title = "Variable importance - Random Forest")
 ```
 
-**alcohol**, **feat07** and **volatile.acidity** are the most important variables.
+**volatile.acidity**, **total.sulfur.dioxide** and **alcohol** and  are the most important variables.
 
 ## Generalized Boosted Regression Modeling (GBM)
 
@@ -233,7 +517,7 @@ Next model is GBM. In this case 4 hyperparameters will be optimized:
 - *n.minobsinnode* - minimum number of observations in split. I'll try values between 10 and 25 (by 5).
 
 ```{r, train_gbm}
-model_gbm <- caret::train(form = create_model_formula("quality", x_variables),
+model_gbm <- caret::train(form = create_model_formula("quality", new_x_variables),
                           data = data_train, 
                           method = "gbm",
                           trControl = train_control_params, 
@@ -261,7 +545,7 @@ plot(model_gbm)
 
 ### {-}
 
-As we can suspect the quality of the model gains as the number of trees increases (**ntree**). What is interesting that the behavior of **shrinkage** and **interaction.depth** parameters. In the end the combination of lower learning rate (**shrinkage** = 0.01) and higher depth of tree (**interaction.depth** = 4) turned out to be the best combination. Tuning of the last parameter (**n.minobsinnode**) resulted in value equal to 10.  
+As we can suspect the quality of the model gains as the number of trees increases (**ntree**). What is interesting that the behavior of **shrinkage** and **interaction.depth** parameters. In the end the combination of higher learning rate (**shrinkage** = 0.1) and lower depth of tree (**interaction.depth** = 1) turned out to be the best combination. Tuning of the last parameter (**n.minobsinnode**) resulted in value equal to 25.  
 
 ### Model results
 
@@ -273,7 +557,7 @@ var_imp_plot(data_ = summary.gbm(object = model_gbm$finalModel, plotit = FALSE),
              var_imp_name = "rel.inf", plot_title = "Variable importance - GBM")
 ```
 
-In GBM model the most important variables were **alcohol**, **feat07**, **volatile.acidity**, **feat04** and **sulphates**.
+In GBM model the most important variables were **volatile.acidity**, **total.sulfur.dioxide** and **alcohol**.
 
 ## eXtreme Gradient Boosting (XGBoost)
 
@@ -282,7 +566,7 @@ In GBM model the most important variables were **alcohol**, **feat07**, **volati
 - *min_child_weight* - minimum number of observations in terminal node. Searching from 0.5% to 1% of number of observations (by 0.1%)
 - *nrounds* - number of trees. Searching between 20 and 80 (by 10)
 - *eta* - learning parameter. Searching between 0.01 to 0.15 (by 0.01)
-- *colsample_bytree* - fraction of predictors to use. Searching between $\frac{\sqrt{21}}{21}$ ~ 21% to 61% (by 10%)
+- *colsample_bytree* - fraction of predictors to use. Searching between $\frac{\sqrt{27}}{27}$ ~ 19% to 59% (by 10%)
 
 Other 3 will be set constant:
 
@@ -291,25 +575,25 @@ Other 3 will be set constant:
 - *max_depth* - maximum depth of tree (set to 8)
 
 ```{r, traing_xgboost}
-tune_params_xgboost <- list(colsample_bytree = seq(sqrt(length(x_variables)) / length(x_variables), 0.65, 0.1),
-                            min_child_weight = nrow(data_train) * seq(.5, 1, .1) / 100,
+tune_params_xgboost <- list(min_child_weight = nrow(data_train) * seq(.5, 1, .1) / 100,
                             nrounds = seq(20, 80, 10),
-                            eta = seq(0.01, .15, by = .01))
+                            eta = seq(0.01, .15, by = .01),
+                            colsample_bytree = seq(sqrt(length(new_x_variables)) / length(new_x_variables), 0.60, 0.1))
 
 static_params_xgboost <- list(subsample = 0.8, 
                               gamma = 1,
                               max_depth = 8)
 
-file_to_look_for <- "model_xgboost_reg.rds"
+file_to_look_for <- paste0(store_results_in, "model_xgboost_reg.rds")
 if (!file.exists(file_to_look_for)) {
     start <- Sys.time()
-    model_xgboost <- caret::train(form = create_model_formula("quality", x_variables),
+    model_xgboost <- caret::train(form = create_model_formula("quality", new_x_variables),
                                   data = data_train,
                                   method = "xgbTree",
                                   trControl = train_control_params, 
                                   tuneGrid = do.call("expand.grid", c(static_params_xgboost, tune_params_xgboost)),
                                   verbosity = 0)
-    print(Sys.time() - start) # 3mins
+    print(Sys.time() - start) # 2mins
     saveRDS(object = model_xgboost, file = file_to_look_for)
 } else {
     model_xgboost <- readRDS(file = file_to_look_for)
@@ -346,7 +630,7 @@ do.call(rbind, args = lapply(X = names(tune_params_xgboost), FUN = function(i) {
 
 ### {-}
 
-It seems that **colsample_bytree** and **min_child_weight** parameters didn't really matter. As suspected larger **eta** and **nrounds** lead to better results. But the best results were achieved with **eta** = 0.05, **nrounds** = 80, **colsample_bytree** = 0.41 and **min_child_weight** = 9.8. The best **eta** point could be observed as an elbow point in both standard (if displayed on large enough screen) and non-standard plots.
+It seems that **colsample_bytree** and **min_child_weight** parameters didn't really matter. As suspected larger **eta** and **nrounds** lead to better results. But the best results were achieved with **eta** = 0.08, **nrounds** = 60, **colsample_bytree** = 0.29 and **min_child_weight** = 5.9. 
 
 ### Model results
 
@@ -358,14 +642,14 @@ var_imp_plot(data_ = varImp(model_xgboost)$importance %>% mutate(variable = row.
              var_imp_name = "Overall", plot_title = "Variable importance - xGBoost")
 ```
 
-In xGBoost model the most important variables were **alcohol**, **feat07**, **volatile.acidity**, **feat04** and **sulphates**. It is the same set of features as in GBM model (slightly different order).
+In xGBoost model the most important variables were **total.sulfur.dioxide**, **volatile.acidity** and **sulphates**.
 
 ## Linear regression
 
 As a benchmark model I'll used simple linear regression model.
 
 ```{r, train_lm}
-model_linear_regr <- caret::train(form = create_model_formula("quality", x_variables), 
+model_linear_regr <- caret::train(form = create_model_formula("quality", new_x_variables), 
                                   data = data_train,
                                   method = "lm", 
                                   trControl = train_control_params)
@@ -376,7 +660,7 @@ model_linear_regr <- caret::train(form = create_model_formula("quality", x_varia
 I'll use all the previous models for ensembling and stacking.
 
 ```{r, list_ensemble}
-model_list <- caretEnsemble::caretList(create_model_formula("quality", x_variables),
+model_list <- caretEnsemble::caretList(create_model_formula("quality", new_x_variables),
                                        data = data_train,
                                        methodList = c("lm"),
                                        tuneList = list(
@@ -418,14 +702,7 @@ modelCor(resamples(model_list)) %>%
 
 ## {-}
 
-The highest correlation (in absolute terms) are between:
-
-- xGBoost and GBM: 0.9905
-- xGBoost and Random Forest: 0.9500
-- GBM and Linear Regression: 0.9469
-- Linear Regression and xGBoost: 0.9291
-
-Those findings are consistent with what was seen when analyzing each model separately.
+The highest correlation (in absolute terms) are between Linear Regression-Random Forest and GBM-XGBoost. Those findings are consistent with what was seen when analyzing each model separately.
 
 ## Ensembling
 
@@ -442,7 +719,7 @@ res_var_imp_ens <- varImp(model_ensembled) %>%
     gather("model", "importance", -variable)
 
 imp_lvls <- res_var_imp_ens %>% 
-    filter(model == "overall")  %>% top_n(n = 10, wt = importance) %>% arrange(importance) %>% .$variable
+    filter(model == "overall") %>% top_n(n = 10, wt = importance) %>% arrange(importance) %>% .$variable
 
 res_var_imp_ens %>% 
     filter(variable %in% imp_lvls) %>% 
@@ -460,7 +737,7 @@ res_var_imp_ens %>%
     theme(legend.position = "bottom")
 ```
 
-As we clearly see the Decision Tree model picked substantially different variables as the most important.
+In the ensembled model most important variables were **volatile.acidity**, **totat.sulfur.dioxide** and level 4 of **alcohol**.
 
 ## Stacking 
 
@@ -487,15 +764,17 @@ model_stacked_lasso <- caretEnsemble::caretStack(model_list,
 As an assessment methods I'll use RMSE. First, define model list:
 
 ```{r, define_models_for_comparison}
-model_list_specs <- list("Decision tree" = list(model_n = "model_dec_tree"),
-                         "Random forest" = list(model_n = "model_random_forest"),
-                         "GBM"           = list(model_n = "model_gbm"),
-                         "XGBoost"       = list(model_n = "model_xgboost"),
-                         "Linear"        = list(model_n = "model_linear_regr"),
-                         "Ensembled"     = list(model_n = "model_ensembled"),
-                         "Stacked (XGB)" = list(model_n = "model_stacked_xgb"),
-                         "Stacked (Lasso)"  = list(model_n = "model_stacked_lasso"))
+model_list_specs <- list("Decision tree"   = list(model_n = "model_dec_tree"),
+                         "Random forest"   = list(model_n = "model_random_forest"),
+                         "GBM"             = list(model_n = "model_gbm"),
+                         "XGBoost"         = list(model_n = "model_xgboost"),
+                         "Linear"          = list(model_n = "model_linear_regr"),
+                         "Ensembled"       = list(model_n = "model_ensembled"),
+                         "Stacked (XGB)"   = list(model_n = "model_stacked_xgb"),
+                         "Stacked (Lasso)" = list(model_n = "model_stacked_lasso"))
 ```
+
+Then plot those models against **quality** variable to additionally see how the models performed.
 
 ## Comparison {.tabset}
 
@@ -523,7 +802,7 @@ summ_up_table <- do.call(what = "rbind",
                                        })) %>% 
     arrange(., abs(rmse_train - rmse_test)) 
 
-saveRDS(object = summ_up_table, file = "regr_summ_up_table.rds")
+saveRDS(object = summ_up_table, file = paste0(store_results_in, "regr_summ_up_table.rds"))
 
 summ_up_table %>% 
     mutate(rank_train = rank(rmse_train), rank_test = rank(rmse_test)) %>% 
@@ -535,11 +814,16 @@ summ_up_table %>%
 
 ## Results
 
-Smallest RMSE on train data was recorded in Random Forest (0.43), largest in Decision Tree (1.1). On testing data smallest RMSE characterized Ensembled model (1.13), largest: Decision Tree (1.24).
+Smallest RMSE on train data was recorded in Random Forest (0.63), largest in Decision Tree (1.1). On testing data smallest RMSE characterized Stacked model using Lasso Regression (1.13), largest: Decision Tree (1.23).
 Smallest overfit was found in Linear Regressien (as measure by the change between RMSE in training vs testing dataset). 
 
 # Summary and conclusions
 
-Ensemble model was the best model - it had 3rd lowest RMSE on training data and 1st lowest on testing. 
-- Stacking with linear regression yields same (ish) results as ensembling
-- alcohol as most dominant feature
+- Stacked model was the best model - it had 3rd lowest RMSE on training data and 1st lowest on testing
+- Random Forest was quite overfit, despite the fact that several multiple continuous variables were transformed into discrete
+- from the artificial variables only **feat04** and **feat07** were used
+- most important features overall were
+    - **volatile.acidity**
+    - **total.sulfur.dioxide**
+    - **trans.alcohol4** which translates to value of **alcohol** between 12.1 and 15
+    - **trans.feat072** which translates to values of **feat07** between 0.5 and 0.7

@@ -24,31 +24,33 @@ library(pROC)
 # settings
 knitr::opts_chunk$set(cache = FALSE)
 options(scipen = 999)
+store_results_in <- "class_results/"
+dir.create(store_results_in, showWarnings = FALSE, recursive = TRUE)
 
 # functions
 source("__functions.R")
 ```
 
-```{r, reading_data}
-data_raw <- read_csv(file = "c3.csv", show_col_types = FALSE)
-```
-
 # Description of data and problem
 ## Data
-1994 Census database. Quick look at the dataset structure.
+
+Data is taken from 1994 Census database. Load the dataset and take a quick look at the dataset structure.
 
 ```{r, glimpse_at_data}
+# Load the data and check basic characterstics
+data_raw <- read_csv(file = "c3.csv", show_col_types = FALSE)
 glimpse(data_raw)
 ```
 
-42,651 observations, 26 variables.
+42,561 observations, 26 variables.
 
 ## Problem
+
 Predict whether a person makes over 50,000 a year.
 
 # Descriptive analyses
 
-Establish dependent variable (**y_variable**) and predictors (**x_variables**).
+Start with establishing dependent variable (**y_variable**) and predictors (**x_variables**).
 
 ```{r, data_cleaning}
 # Change the column names to avoid possible problems in the future
@@ -79,7 +81,7 @@ data_raw %>%
           axis.title = element_blank())
 ```
 
-Ii is not balanced but no need for over/under sampling.
+It is not balanced but no need for over/under sampling.
 
 Levels contains special characters - remove them (it will cause problems when trying to get predicted probabilities).
 
@@ -101,31 +103,56 @@ Take a look at continuous variables:
 ```{r, descr_cont}
 table_descr_cont <- do.call(what = rbind, args = lapply(X = x_variables_cont, FUN = function(i) describe_cont_var(data_raw, i)))
 
-saveRDS(object = table_descr_cont, file = "class_table_descr_cont.rds")
+saveRDS(object = table_descr_cont, file = paste0(store_results_in, "class_table_descr_cont.rds"))
+
+wilcox <- do.call(what = rbind, 
+                  args = lapply(X = x_variables_cont, 
+                                FUN = function(i) {
+                                    pp <- wilcox.test(data_raw %>% filter(salary == "atmost50K") %>% .[[i]], 
+                                                      data_raw %>% filter(salary != "atmost50K") %>% .[[i]])
+                                    data.frame(name = i, is_signif = pp$p.value < 0.05)
+                                }))
 
 table_descr_cont %>% 
     mutate(min = round(min, 2), mean = round(mean, 2), sd = round(sd, 2), max = round(max, 2)) %>% 
-    kable(booktabs = T) %>%
-    kable_styling()
+    left_join(wilcox, by = "name") %>% 
+    kable(booktabs = T, col.names = c("Variable", "Min.", "Mean", "SD", "Max.", "# missing", "# unique", "Is mean signif. diff?")) %>%
+    kable_styling() %>% 
+    row_spec(row = which(!wilcox$is_signif), background = "red")
 ```
 
 - no need for imputation (no missing records)
 - **education.num** has 16 distinct values - might be good idea to change it to discrete
+- based on two-samples Wilcoxon test there are multiple variables (e.g **feat08**) that mean in subgroups is not significantly different. Those variables might be dropped
 
-Discrete variables
+Quick look at discrete variables:
 
 ```{r, descr_disc}
 table_descr_disc <- do.call(rbind, lapply(X = x_variables_disc, FUN = function(i) describe_disc_var(data_raw, i)))
 
-saveRDS(object = table_descr_disc, file = "class_table_descr_disc.rds")
+saveRDS(object = table_descr_disc, file = paste0(store_results_in, "class_table_descr_disc.rds"))
+
+chi_square <- lapply(X = x_variables_disc, 
+                     FUN = function(i){
+    pp <- data_raw %>% group_by_at(c(i, "salary")) %>% summarise(count = n()) %>% 
+        pivot_wider(id_cols = i, names_from = "salary", values_from = "count", values_fill = 0) %>% .[, -1] %>% 
+        chisq.test()
+    data.frame(name = i, chi = pp$p.value < 0.05)
+})
 
 table_descr_disc %>% 
-    kable(booktabs = T) %>%
+    left_join(y = do.call(rbind, chi_square), by = "name") %>% 
+    kable(booktabs = T, col.names = c("Variable", "# levels", "# missing", "Top levels", "% range", "# range", "Relation with y?")) %>%
     kable_styling()
 ```
 
 - **education** has 16 levels - same as **education.num** - possible duplicate of information
 - **marital.status**, **native.country**, **occupation** and **workclass* has levels with less than 30 observations - those might cause problems with resampling
+- based on chi-squared test all the variable are not indepedent from **salary** variable
+
+## EDA - discrete variables {.tabset}
+
+### education
 
 Examine further **education** and **education.num** variables
 
@@ -144,6 +171,8 @@ Loose the **education.num** variable
 x_variables_cont <- setdiff(x_variables_cont, "education.num")
 ```
 
+### marital.status
+
 Examine variables with low groups - marital.status
 
 ```{r, marital_exam}
@@ -156,7 +185,7 @@ marital_sum %>%
   row_spec(which(marital_sum$count_n < 30), bold = T, color = "white", background = "red")
 ```
 
-Since Married-AF-spouse has similar percentage of observations earning > 50K we join those two together
+Since *Married-AF-spouse* has similar percentage of observations earning > 50K we join those two together
 
 ```{r, marital_transform}
 data_raw <- data_raw %>% 
@@ -164,6 +193,8 @@ data_raw <- data_raw %>%
                                       .default = marital.status))
 x_variables_disc <- c(setdiff(x_variables_disc, "marital.status"), "marital.status2")
 ```
+
+### native.country
 
 What about **native.country**?
 
@@ -225,7 +256,9 @@ data_raw <- data_raw %>%
 x_variables_disc <- c(setdiff(x_variables_disc, "native.country"), "native.country2")
 ```
 
-Occupation
+### occupation
+
+Next, **occupation**
 
 ```{r, occupation_exam}
 occupation_sum <- data_raw %>% 
@@ -237,7 +270,7 @@ occupation_sum %>%
   row_spec(which(occupation_sum$count_n < 30), bold = T, color = "white", background = "red")
 ```
 
-Join **Armed-Forces** with **Protective-serv** and **?** with **Other-service**
+Lets join *Armed-Forces* with *Protective-serv* and *?* with *Other-service*
 
 ```{r, occupation_transform}
 data_raw <- data_raw %>% 
@@ -247,19 +280,22 @@ data_raw <- data_raw %>%
 x_variables_disc <- c(setdiff(x_variables_disc, "occupation"), "occupation2")
 ```
 
-**workclass**
+### workclass
+
+Take a look at **workclass**
 
 ```{r, workclass_exam}
 workclass_sum <- data_raw %>% 
     group_by_at("workclass") %>% 
     summarise(count_n = n(), dist = sum(salary == "morethan50K") / count_n)
+
 workclass_sum %>% 
   kable() %>%
   kable_styling() %>%
   row_spec(which(workclass_sum$count_n < 30), bold = T, color = "white", background = "red")
 ```
 
-Join **Never-worked** and **Without-pay**
+Seems like we can join *Never-worked* and *Without-pay* levels together
 
 ```{r, workclass_transform}
 data_raw <- data_raw %>% 
@@ -267,6 +303,8 @@ data_raw <- data_raw %>%
                                    .default = workclass))
 x_variables_disc <- c(setdiff(x_variables_disc, "workclass"), "workclass2")
 ```
+
+## {-}
 
 Just to make sure all the transformation went as expected.
 
@@ -276,6 +314,8 @@ do.call(rbind, lapply(X = x_variables_disc, FUN = function(i) describe_disc_var(
 
 Still 2 variables has < 30 in some levels but we are OK with it.
 
+## EDA - continous variables {.tabset}
+
 Is there a correlation between continuous variables?
 
 ```{r, corrplot}
@@ -284,23 +324,206 @@ corrplot::corrplot(corr = cor(data_raw[, x_variables_cont]), method = "color")
 
 No clear correlation between continuous variables.
 
+### age
+
+```{r, age_plot}
+create_perc_plot(data_ = data_raw, col_name_ = "age")
+```
+
+There is a quadratic relation between **age** and **salary**. I'll leave that variable as it is.
+
+### capital.gain
+
+```{r, capital.gain_plot}
+create_perc_plot(data_ = data_raw %>% mutate(capital.gain = capital.gain + 1e-1), 
+                 col_name_ = "capital.gain", q_breaks = c(-Inf, 1, 3 * 1e3, Inf)) + 
+    scale_x_log10()
+```
+
+
+There is a logarithmic relation between **capital.gain** and **salary** (I've added small number to get rid of warnings regarding {log} from 0's being infinite). I've decided to split this variable into 3 bins.
+
+```{r, capital.gain_transform}
+data_raw <- data_raw %>% 
+    mutate(trans.capital.gain = as.character(as.numeric(cut(x = capital.gain, c(-Inf, 1, 3 * 1e3, Inf)), include.lowest = T)))
+```
+
+### capital.loss
+
+```{r, capital.loss_plot}
+create_perc_plot(data_ = data_raw, col_name_ = "capital.loss", q_breaks = c(-Inf, 500, Inf))
+```
+
+There is a weak relation between **salary** and **capital.loss**. I've decided to split it into 2 bins.
+
+```{r, capital.loss_transform}
+data_raw <- data_raw %>% 
+    mutate(trans.capital.loss = as.character(as.numeric(cut(x = capital.loss, c(-Inf, 500, Inf)), include.lowest = T)))
+```
+
+
+### feat01
+
+```{r, feat01_plot}
+# to simplify plottig I'll round the values
+create_perc_plot(data_ = data_raw %>% mutate(feat01 = round(feat01, 3)), col_name_ = "feat01", q_breaks = c(-Inf, Inf))
+```
+
+This variable seems to has no clear relation with **salary**. I've decided to remove that variable.
+
+```{r, feat01_transform}
+x_variables_cont <- setdiff(x_variables_cont, "feat01")
+```
+
+### feat02
+
+```{r, feat02_plot}
+create_perc_plot(data_ = data_raw %>% mutate(feat02 = round(feat02, 3)), col_name_ = "feat02", q_breaks = c(-Inf, Inf))
+```
+
+**feat02** has some positive relation with **salary** variable. I've decided to leave it as it is.
+
+### feat03
+
+```{r, feat03_plot}
+create_perc_plot(data_ = data_raw %>% mutate(feat03 = round(feat03, 3)), col_name_ = "feat03", q_breaks = c(-Inf, Inf))
+```
+
+This variable seems to has no clear relation with **salary**. I've decided to remove that variable.
+
+```{r, feat03_transform}
+x_variables_cont <- setdiff(x_variables_cont, "feat03")
+```
+
+### feat04
+
+```{r, feat04_plot}
+create_perc_plot(data_ = data_raw %>% mutate(feat04 = round(feat04, 3)), col_name_ = "feat04")
+```
+
+**feat04** has some quadratic relation with **salary**. I'll leave it as it is.
+
+### feat05
+
+```{r, feat05_plot}
+create_perc_plot(data_ = data_raw %>% mutate(feat05 = round(feat05, 3)), col_name_ = "feat05", q_breaks = c(-Inf, Inf))
+```
+
+This variable seems to has no clear relation with **salary**. I've decided to remove that variable.
+
+```{r, feat05_transform}
+x_variables_cont <- setdiff(x_variables_cont, "feat05")
+```
+
+### feat06
+
+```{r, feat06_plot}
+create_perc_plot(data_ = data_raw %>% mutate(feat06 = round(feat06, 3)), col_name_ = "feat06", q_breaks = c(-Inf, Inf))
+```
+
+**feat06** has some positive relation with **salary** variable. I've decided to leave it as it is.
+
+
+### feat07
+
+```{r, feat07_plot}
+create_perc_plot(data_ = data_raw %>% mutate(feat07 = round(feat07, 3)), col_name_ = "feat07", q_breaks = c(-Inf, Inf))
+```
+
+This variable seems to has no clear relation with **salary**. I've decided to remove that variable.
+
+```{r, feat07_transform}
+x_variables_cont <- setdiff(x_variables_cont, "feat07")
+```
+
+### feat08
+
+```{r, feat08_plot}
+create_perc_plot(data_ = data_raw %>% mutate(feat08 = round(feat08, 3)), col_name_ = "feat08", q_breaks = c(-Inf, Inf))
+```
+
+This variable seems to has no clear relation with **salary**. I've decided to remove that variable.
+
+```{r, feat08_transform}
+x_variables_cont <- setdiff(x_variables_cont, "feat08")
+```
+
+### feat09
+
+```{r, feat09_plot}
+create_perc_plot(data_ = data_raw %>% mutate(feat09 = round(feat09, 3)), col_name_ = "feat09", q_breaks = c(-Inf, Inf))
+```
+
+This variable seems to has no clear relation with **salary**. I've decided to remove that variable.
+
+```{r, feat09_transform}
+x_variables_cont <- setdiff(x_variables_cont, "feat09")
+```
+
+### feat10
+
+```{r, feat10_plot}
+create_perc_plot(data_ = data_raw %>% mutate(feat10 = round(feat10, 3)), col_name_ = "feat10", q_breaks = c(-Inf, Inf))
+```
+
+This variable seems to has no clear relation with **salary**. I've decided to remove that variable.
+
+```{r, feat10_transform}
+x_variables_cont <- setdiff(x_variables_cont, "feat10")
+```
+
+### fnlwgt
+
+```{r, fnlwgt_plot}
+create_perc_plot(data_ = data_raw %>% mutate(fnlwgt = round(fnlwgt, 0)), col_name_ = "fnlwgt") + scale_x_log10()
+```
+
+This variable seems to has no clear relation with **salary**. I've decided to remove that variable.
+
+```{r, fnlwgt_transform}
+x_variables_cont <- setdiff(x_variables_cont, "fnlwgt")
+```
+
+### hours.per.week
+ 
+```{r, hours.per.week_plot}
+create_perc_plot(data_ = data_raw, col_name_ = "hours.per.week", q_breaks = c(-Inf, 20, 40, Inf))
+``` 
+
+This variable has some relation with **salary**. I've decided to split this variable into 3 bins.
+
+```{r, hours.per.week_transform}
+data_raw <- data_raw %>% 
+    mutate(trans.hours.per.week = as.character(as.numeric(cut(x = hours.per.week, c(-Inf, 20, 40, Inf)), include.lowest = T)))
+```
+
 # Data preparation
 
-## Variable transformations
+After initial EDA I've decided to:
+
+- bin several continuous variables into discrete
+- remove continuous variables with no correlation to **salary**
+- leave continuous some variables as they were
+- join low frequent levels in discrete variables
 
 Perform one-hot encoding for discrete variables:
 
 ```{r, one_hot}
-one_hot_data <- data.frame(predict(object = dummyVars(formula = " ~ .", data = data_raw[x_variables_disc]), 
+x_variables_disc <- c(x_variables_disc, names(data_raw)[which(regexpr(pattern = "^trans", text = names(data_raw)) > 0)])
+# fullRank = TRUE takes care of linear dependency of variables
+one_hot_data <- data.frame(predict(object = dummyVars(formula = " ~ .", data = data_raw[x_variables_disc], fullRank = TRUE), 
                                    newdata = data_raw[x_variables_disc]))
 ```
 
 Bind all in one object:
 
 ```{r, create_new_data}
+x_variables_cont <- setdiff(x_variables_cont, gsub(pattern = "^trans\\.", replacement = "", x = x_variables_disc))
 new_data_raw <- cbind(data_raw[c(y_variable, x_variables_cont)], one_hot_data)
 new_x_variables <- setdiff(names(new_data_raw), y_variable)
 ```
+
+Final dataset consists 90 variables.
 
 ## Creating training and testing dataset
 
@@ -375,7 +598,7 @@ Take a look at the splits of the tree.
 rpart.plot::rpart.plot(model_dec_tree$finalModel)
 ```
 
-It is a quite complicated tree. We can see that **marital.status2Married.civ.AF.spouse**, **capital.gain**, **capital.loss**, **educationBachelors**, **educationMasters**, **feat06** and **feat02** are used. How important are specific variables?
+It is a quite complicated tree. We can see that **marital.status2Married.civ.AF.spouse**, **capital.gain**, **feat04**, **educationBachelors**, **educationMasters**, **feat06** and **feat02** are used. How important are specific variables?
 
 ```{r, var_imp_dec_tree}
 var_imp_plot(data_ = varImp(model_dec_tree$finalModel) %>% mutate(variable = row.names(.)), 
@@ -383,14 +606,14 @@ var_imp_plot(data_ = varImp(model_dec_tree$finalModel) %>% mutate(variable = row
              var_imp_name = "Overall", plot_title = "Variable importance - Decision Tree", n_limit = 10)
 ```
 
-**capital.gain**, **marital.status2Married.civ.AF.spouse**, **relationshipHusband** and **occupation2Prof.specialty** are the most important variables.
+**capital.gain**, **marital.status2Married.civ.AF.spouse**, **feat04** and **occupation2Prof.specialty** are the most important variables.
 
 ## Random forest
 
-Next model to use is random forest. I'll change number of trees (**ntree**) from 500 to 200. Additionally I'll try to find the optimal value of **mtry** parameter. In order to do so I'll search the values between 6 and 4 (the default value is square root from the number of predictors - in ths case $\sqrt{104} = 10.2$)
+Next model to use is random forest. I'll change number of trees (**ntree**) from default 500 to 200. Additionally I'll try to find the optimal value of **mtry** parameter. In order to do so I'll search the values between 6 and 14 (the default value is square root from the number of predictors - in ths case $\sqrt{90} = 9.5$)
 
 ```{r, train_random_forest}
-file_to_look_for <- "model_rf_class.rds"
+file_to_look_for <- paste0(store_results_in, "model_rf_class.rds")
 if (!file.exists(file_to_look_for)) {
     start <- Sys.time()
     model_random_forest <- caret::train(form = create_model_formula(y_variable, new_x_variables),
@@ -399,7 +622,7 @@ if (!file.exists(file_to_look_for)) {
                                         ntre = 200,
                                         tuneGrid = data.frame(mtry = seq(6, 14, by = 2)),
                                         trControl = train_control_params)
-    print(Sys.time() - start) # 30 minutes
+    print(Sys.time() - start) # 12 minutes
     saveRDS(object = model_random_forest, file = file_to_look_for)
 } else {
     model_random_forest <- readRDS(file = file_to_look_for)
@@ -434,19 +657,19 @@ var_imp_plot(data_ = varImp(model_random_forest)$importance %>% mutate(variable 
              var_imp_name = "Overall", plot_title = "Variable importance - Random Forest", n_limit = 20)
 ```
 
-**capital.gain**, **feat04**, **marital.status2Married.civ.AF.spouse**, **feat06** and **age** are the most important variables when I use Random Forest.
+**feat04**, **marital.status2Married.civ.AF.spouse**, **feat06**, **feat02** and **age** are the most important variables when using tuned Random Forest.
 
 ## Generalized Boosted Regression Modeling (GBM)
 
 Next model is GBM. In this case 4 hyperparameters will be optimized:
 
 - *ntree* - number of trees. Values from 100 to 300 (by 50) will be checked.
-- *interaction.depth* - depth of a tree. Since there are 100 predictors, I'll check only values of 1 and 2.
+- *interaction.depth* - depth of a tree. Since there are 90 predictors, I'll check only values of 1 and 2.
 - *shrinkage* - learning rate parameter. Only 2 values of this parameter will be used: 0.01 and 0.1
 - *n.minobsinnode* - minimum number of observations in split. Since the training dataset is quite large I'll try values from 100 to 250 (by 50).
 
 ```{r, train_gbm}
-file_to_look_for <- "model_gbm_class.rds"
+file_to_look_for <- paste0(store_results_in, "model_gbm_class.rds")
 if (!file.exists(file_to_look_for)) {
     start <- Sys.time()
     model_gbm <- caret::train(form = create_model_formula(y_variable, new_x_variables),
@@ -492,7 +715,7 @@ var_imp_plot(data_ = summary.gbm(object = model_gbm$finalModel, plotit = FALSE),
              var_imp_name = "rel.inf", plot_title = "Variable importance - GBM", n_limit = 20)
 ```
 
-In GBM model the most important features were **marital.status2Married.civ.AF.spouse**, **capital.gain**, **feat04**, , **feat06**, **age** and **feat02**.
+In GBM model the most important features were **marital.status2Married.civ.AF.spouse**, **capital.gain** (one of the levels), **feat04**, **feat06**, **age** and **feat02**.
 
 ## eXtreme Gradient Boosting (XGBoost)
 
@@ -504,7 +727,7 @@ In GBM model the most important features were **marital.status2Married.civ.AF.sp
 
 Other 4 will be set constant:
 
-- *colsample_bytree* - fraction of predictors to use (set to $\frac{\sqrt{104}}{104}$ ~ 10%)
+- *colsample_bytree* - fraction of predictors to use (set to $\frac{\sqrt{90}}{90}$ ~ 11%)
 - *subsample* - size (in %) of subsample drawn from training dataset (set to 80)
 - *gamma* - Minimum Loss Reduction (set to 1)
 - *max_depth* - maximum depth of tree (set to 8)
@@ -519,14 +742,14 @@ static_params_xgboost <- list(colsample_bytree = sqrt(length(new_x_variables)) /
                               gamma = 1,
                               max_depth = 8)
 
-file_to_look_for <- "model_xgboost_class.rds"
+file_to_look_for <- paste0(store_results_in, "model_xgboost_class.rds")
 if (!file.exists(file_to_look_for)) {
     start <- Sys.time()
     model_xgboost <- caret::train(form = create_model_formula(y_variable, new_x_variables),
                                   data = data_train,
                                   method = "xgbTree",
                                   trControl = train_control_params, 
-                                  tuneGrid = do.call("expand.grid", c(static_params_xgboost, tune_params_xgboost)),
+                                  tuneGrid = do.call(what = expand.grid, args = c(static_params_xgboost, tune_params_xgboost)),
                                   verbosity = 0)
     print(Sys.time() - start) # 7 mins
     saveRDS(object = model_xgboost, file = file_to_look_for)
@@ -552,9 +775,11 @@ plot(model_xgboost)
 #### Non-standard plot
 
 ```{r, xgb_hyper_plot_other}
-do.call(rbind, args = lapply(X = names(tune_params_xgboost), FUN = function(i) {
-    model_xgboost$results %>% select(tune_val = i, meas_val = Accuracy) %>% mutate(flag = i)
-})) %>% 
+do.call(what = rbind, 
+        args = lapply(X = names(tune_params_xgboost), 
+                      FUN = function(i) {
+                          model_xgboost$results %>% select(tune_val = i, meas_val = Accuracy) %>% mutate(flag = i)
+                      })) %>% 
     ggplot(mapping = aes(x = tune_val, y = meas_val)) + 
     geom_point() +
     facet_wrap(~flag, scales = "free_x") +
@@ -563,7 +788,7 @@ do.call(rbind, args = lapply(X = names(tune_params_xgboost), FUN = function(i) {
     theme_minimal()
 ```
 
-As suspected larger **eta** and **nrounds** but lower **min_child_weight** lead to better results. But the best results were achieved with **eta** = 0.15, **nrounds** = 150 and **min_child_weight** = 148. The best **eta** point could be observed as an elbow point in both standard and non-standard plots.
+As suspected larger **eta** and **nrounds** but lower **min_child_weight** lead to better results. But the best results were achieved with **eta** = 0.35, **nrounds** = 150 and **min_child_weight** = 148.
 
 ### Model results
 
@@ -575,7 +800,7 @@ var_imp_plot(data_ = varImp(model_xgboost)$importance %>% mutate(variable = row.
              var_imp_name = "Overall", plot_title = "Variable importance - xGBoost", n_limit = 20)
 ```
 
-In xGBoost model the most important features were **capital.gain**, **marital.status2Married.civ.AF.spouse**,  **feat04**, **age**, **feat02** and **feat06**. It is the same set of features as in GBM model (slightly different order).
+In xGBoost model the most important features were **age**, **feat04**, **capital.gain** (level 3 of transformed variable), **feat06**, **feat02** and **marital.status2Married.civ.AF.spouse**. It is the same set of features as in GBM model (slightly different order).
 
 ## Logistic regression
 
@@ -589,14 +814,12 @@ model_logistic_regr <- caret::train(form = create_model_formula(y_variable, new_
                                     family = "binomial")
 ```
 
-*Note* - it didn't converge because of colinearity of one-hot encoded variables that included all the levels.
-
 # Ensembling and stacking
 
 I'll use all the previous models for ensembling and stacking.
 
 ```{r, list_ensemble}
-file_to_look_for <- "model_list_class.rds"
+file_to_look_for <- paste0(store_results_in, "model_list_class.rds")
 if (!file.exists(file_to_look_for)) {
     start <- Sys.time()
     model_list <- caretEnsemble::caretList(create_model_formula(y_variable, new_x_variables),
@@ -646,14 +869,7 @@ modelCor(resamples(model_list)) %>%
 
 ## {-}
 
-The highest correlation (in absolute terms) are between:
-
-- GBM and Random Forest: 0.9699
-- GBM and Logistic Regression: 0.9313
-- Logistic Regression and Random Forest: 0.9031
-- xGBoost and and Decision tree: -0.8201
-
-Those findings are consistent with what was seen when analyzing each model separately. The negative/weak correlation between Decision Tree model and other model is expected based on the previous results.
+The highest correlation (in absolute terms) are between GBM and Random Forest, GBM and Logistic Regression, xGBoost and Decision tree. Those findings are consistent with what was seen when analyzing each model separately. 
 
 ## Ensembling
 
@@ -689,6 +905,8 @@ res_var_imp_ens %>%
     theme(legend.position = "bottom")
 ```
 
+In ensembled model the most important feature is **marital.status2Married.civ.AF.spouse**. Next are **feat04** and **capital.gain** (level 3 of transformed variable). Last 3 of most important are **feat06**, **age** and **feat02**. 
+
 ## Stacking 
 
 As stack model I'll-- use XGBoost and GLM with lasso regularization as top layer models for comparison.
@@ -696,10 +914,9 @@ As stack model I'll-- use XGBoost and GLM with lasso regularization as top layer
 ```{r, train_model_stacked_xgb}
 stacked_tr <- trainControl(method = "boot", 
                            number = 10,
-                           savePredictions = "final",
-)
+                           savePredictions = "final")
 
-file_to_look_for <- "model_stack_class_xgb.rds"
+file_to_look_for <- paste0(store_results_in, "model_stack_class_xgb.rds")
 if (!file.exists(file_to_look_for)) {
     start <- Sys.time()
     model_stacked_xgb <- caretEnsemble::caretStack(model_list,
@@ -720,7 +937,7 @@ model_stacked_glmnet <- caretEnsemble::caretStack(model_list,
 
 # Model assessment 
 
-As an assessment methods I'll use Accuracy First, loo Comparison between training and testing data.
+As an assessment methods I'll use Accuracy. First, create assessment object.
 
 ```{r, creating_comparison_data, warning=FALSE,message=FALSE}
 model_list_specs <- list("Decision tree" = list(model_n = "model_dec_tree"),
@@ -730,10 +947,10 @@ model_list_specs <- list("Decision tree" = list(model_n = "model_dec_tree"),
                          "Logistic"      = list(model_n = "model_logistic_regr"),
                          "Ensembled"     = list(model_n = "model_ensembled"),
                          "Stacked (XGB)" = list(model_n = "model_stacked_xgb"),
-                         "Stacked (GLM)"  = list(model_n = "model_stacked_glmnet")
-                         )
+                         "Stacked (GLM)"  = list(model_n = "model_stacked_glmnet"))
 
 assess_list <- list()
+
 for (i in names(model_list_specs)) {
     this_model <- get(model_list_specs[[i]]$model_n)
     this_list <- list("train" = roc_me(data_train, y_variable, model = this_model),
@@ -741,6 +958,7 @@ for (i in names(model_list_specs)) {
     names(this_list) <- paste0(i, ": ", names(this_list))
     assess_list <- c(assess_list, this_list)
 }
+
 # original ROC data could consist thousands of points. for plotting I'll simplify those
 simplified_roc_data <- simplify_roc_data(model_list = assess_list)
 simplified_roc_data <- simplified_roc_data %>% 
@@ -773,7 +991,7 @@ summ_up_table <- get_metrics(assess_list) %>%
     pivot_wider(names_from = c("data_type"), values_from = c("auc", "gini")) %>% 
     arrange(abs(auc_train - auc_test))
 
-saveRDS(object = summ_up_table, file = "class_summ_up_table.rds")
+saveRDS(object = summ_up_table, file = paste0(store_results_in, "class_summ_up_table.rds"))
 
 summ_up_table %>% 
     mutate(rank_train = rank(-auc_train), rank_test = rank(-auc_test)) %>% 
@@ -789,12 +1007,20 @@ summ_up_table %>%
 
 ## Results
 
-- All of the models seems overfitted, although smallest difference (in absolute terms) was in GBM model 
-- Random forest had highest AUC for train, Stacked XGB for test
-- Stacked XGBoost yield best results overall
+Despite binning, removing some variables and tuning parameters, some of the models are overfit: Random Forest, Ensembled, Stacked. Random forest had highest AUC for train data (99.5%), Stacked with XGBoost as top layer model for test data (93.3%). Smallest difference between results on training and test was in GBM model
 
 # Summary and conclusions
 
-- Stacked with XGBoost as top layer model was the best approach
-- Stacking with logistic regression yields same (ish) results as ensembling
-- being married and living with a spouse and capital gain where the most important features
+- Stacked with XGBoost as top layer model was the best approach. It had 3rd highest AUC on trainign and 1st on testing. 
+- Random Forest was quite overfit, despite the fact that several multiple continuous variables were transformed into discrete
+- from the artificial variables only **feat02**, **feat04** and **feat06** were used
+- most important features overall were:
+    - **marital.status2Married.civ.AF.spouse**
+    - **trans.capital.gain3** which translates to value of **capital.gain** of 3,000 and more
+    - **feat06**
+    - **age** 
+    - **feat02**
+    - **occupation2Prof.specialty**
+    - **educationBachelors**
+    - **occupation2Exec.managerial**
+    - **trans.hours.per.week3** which translates to values of **hours.per.week** of 41 and more
